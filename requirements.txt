@@ -1,0 +1,46 @@
+
+numpy
+pandas
+
+# Core Frameworks
+langchain
+langchain-core
+langgraph
+pydantic
+
+# Ecosystem & LLM Integrations
+langchain-community
+langchain-openai
+
+# Google AI Integrations
+langchain-google-genai
+google-genai
+google-generativeai
+
+# sarvamai
+sarvamai
+
+
+# RAG & Vector Storage
+chromadb
+tiktoken
+
+# Utilities
+requests
+python-dotenv
+
+
+langchain-chroma
+
+sentence-transformers
+torch
+
+
+##
+simple-diarizer
+torchcodec 
+pyannote.audio
+pydub
+
+deepeval
+pytest
