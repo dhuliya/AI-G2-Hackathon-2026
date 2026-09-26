@@ -5,6 +5,56 @@ from chromadb.utils import embedding_functions
 from rank_bm25 import BM25Okapi
 
 
+def evaluate_hybrid_scenario(rag, llm_model):
+    print("\n--- Running Hybrid Search Scenario ---")
+    query = "oral history archive xylophone"
+    matches = rag.hybrid_search(query=query, top_k=3)
+
+    if not matches:
+        return False, 0.0, "No search hits returned from hybrid search."
+
+    retrieved_contexts = [m["transcript"] for m in matches]
+    
+    # Formatted actual output including rich metadata details
+    formatted_output_lines = []
+    for idx, m in enumerate(matches, start=1):
+        line = (
+            f"Hit #{idx} [RRF Score: {m['rrf_score']:.4f}] "
+            f"[{m['start_sec']:.1f}s - {m['end_sec']:.1f}s] "
+            f"Speaker {m['speaker_label']} (Blob: {m['audio_blob']}): {m['transcript']}"
+        )
+        formatted_output_lines.append(line)
+
+    test_case = LLMTestCase(
+        input=query,
+        actual_output="\n".join(formatted_output_lines),
+        retrieval_context=retrieved_contexts
+    )
+    
+    metric = ContextualRelevancyMetric(threshold=0.7, model=llm_model)
+    metric.measure(test_case)
+
+    return metric.is_successful(), metric.score, metric.reason
+
+def run_hybrid_evals(rag, llm_model):
+    scenarios = [
+        ("Scenario Hybrid: Hybrid RRF Search Relevancy", evaluate_hybrid_scenario),
+    ]
+
+    results = []
+    for name, func in scenarios:
+        try:
+            passed, score, reason = func(rag, llm_model)
+            status = "PASSED" if passed else "FAILED"
+            results.append((name, status, score, reason))
+        except Exception as e:
+            results.append((name, "ERROR", 0.0, str(e)))
+
+    return results
+
+
+## below is obsolated code.
+
 # ==========================================
 # 1. HYBRID SEARCH LOGIC TO EVALUATE
 # ==========================================
@@ -30,7 +80,7 @@ def hybrid_search(query: str, collections: dict, top_k: int = 5, k: int = 60):
         for i in sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:top_k]
     ]
 
-    # 3. RRF Fusion Scoring
+    # 3. Simple RRF Scoring
     rrf_scores = {}
 
     for rank, doc_id in enumerate(vector_ids, start=1):
@@ -39,11 +89,13 @@ def hybrid_search(query: str, collections: dict, top_k: int = 5, k: int = 60):
     for rank, doc_id in enumerate(keyword_ids, start=1):
         rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (k + rank))
 
+    # Sort top items by RRF score
     fused_results = sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
 
-    # 4. Fetch Details & Cross-Collection ID Derivation
+    # 4. Fetch Details & Format Output
     results = []
     for trans_id, score in fused_results:
+        # Get transcript text
         trans_data = trans_col.get(ids=[trans_id])
         if not trans_data["ids"]:
             continue
@@ -51,23 +103,35 @@ def hybrid_search(query: str, collections: dict, top_k: int = 5, k: int = 60):
         transcript_text = trans_data["documents"][0]
         trans_meta = trans_data["metadatas"][0] if trans_data["metadatas"] and trans_data["metadatas"][0] else {}
 
-        # Derived IDs
+        # DIRECT ID DERIVATION (Guarantees matching across collections)
+        # "trans_audio_123_seg_0" -> "attr_audio_123_seg_0"
+        # "trans_audio_123_seg_0" -> "audio_123_seg_0"
         attr_id = trans_id.replace("trans_", "attr_", 1)
         seg_id = trans_id.replace("trans_", "", 1)
 
+        # Query audio_attributes safely
         attr_data = attr_col.get(ids=[attr_id])
-        attr = attr_data["metadatas"][0] if attr_data["metadatas"] and attr_data["metadatas"][0] else {}
+        attr = (
+            attr_data["metadatas"][0]
+            if attr_data["metadatas"] and attr_data["metadatas"][0]
+            else {}
+        )
 
+        # Query audio_segments safely
         seg_data = seg_col.get(ids=[seg_id])
-        seg = seg_data["metadatas"][0] if seg_data["metadatas"] and seg_data["metadatas"][0] else {}
+        seg = (
+            seg_data["metadatas"][0]
+            if seg_data["metadatas"] and seg_data["metadatas"][0]
+            else {}
+        )
 
+        # Extract with multi-level fallbacks (attr_col -> trans_meta -> default)
         start_sec = attr.get("start_sec") if "start_sec" in attr else trans_meta.get("start_sec")
         end_sec = attr.get("end_sec") if "end_sec" in attr else trans_meta.get("end_sec")
         speaker = attr.get("speaker_label", trans_meta.get("speaker_label", "Unknown"))
         blob = seg.get("blob_path", trans_meta.get("blob_path", "N/A"))
 
         results.append({
-            "trans_id": trans_id,
             "transcript": transcript_text,
             "rrf_score": score,
             "start_sec": start_sec,

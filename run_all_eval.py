@@ -2,6 +2,7 @@ from query_helper import AudioRAGQuerier
 from gemini_wrapper import GoogleGemini
 from eval_deterministic import run_deterministic_evals
 from eval_llm import run_llm_evals
+from eval_hybrid import run_hybrid_evals
 
 def print_summary(results):
     total_passed = 0
@@ -32,11 +33,10 @@ if __name__ == "__main__":
     llm_results = run_llm_evals(rag, gemini_model)
 
     print("\n>>> Phase 3: Running Hybrid Evaluations")
-    from eval_hybrid import run_test_scenario
-    run_test_scenario()
+    hybrid_results = run_hybrid_evals(rag, gemini_model)
 
     # Combined Summary
-    all_results = deterministic_results + llm_results
+    all_results = deterministic_results + llm_results + hybrid_results
 
     print("\n==================================================")
     print("               EVALUATION SUMMARY                 ")
